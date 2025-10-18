@@ -26,27 +26,29 @@ DigitalOut my_digital_output{PA_0}; //Buzzer pin
 ETCData ETC;
 
 
-
 int main()
 {
+    ETC.state = INITIAL;
     while(true){
         switch(ETC.state)
         {
             case INITIAL:
             {
                 //Not sure what brake percentages are so I'm just using the same as APP0
-                double breakPos = 0.5 * sensor3V - 0.125;
-                if(breakPos > 0.8) //Brake position is past 80%
+                double brakePos = 0.5 * (my_analog_pin3.read()*3.3) - 0.125;
+                if(brakePos > 0.8) //Brake position is past 80%
                 {
-                    if(my_digital_input == 1) //Cockpit switch is 1
+                    if(my_digital_input.read() == 1) //Cockpit switch is 1
                     {
                         //Start the Ready to drive sequence and sound the buzzer
                         ETC.state = RTDSEQUENCE;
+                        ETC.RTD_timer.reset();
                         ETC.RTD_timer.start();
                         my_digital_output.write(1); //sound the buzzer
                     }
                 }
-                printf("0");
+                printf("0\n");
+                break;
             }
             case RTDSEQUENCE:
             {
@@ -58,6 +60,7 @@ int main()
                     my_digital_output.write(0); //unsound the buzzer
                     ETC.state = RUNNING;
                 }
+                break;
             }
             case RUNNING:
             {
@@ -66,26 +69,29 @@ int main()
                 double pos1 = 0.5 * sensor1V - 0.125;
                 double pos2 = (5.0 / 12.0) * sensor2V - 0.125;
                 bool expectedRange0 = 0.25 < sensor1V && sensor1V < 2.25;
-                bool expectedRange1 = 0.3 < sensor1V && sensor2V < 2.7;
+                bool expectedRange1 = 0.3 < sensor2V && sensor2V < 2.7;
                 //check for implausibility
                 if(!expectedRange0 || !expectedRange1)
                 {
                     //not in expected ranges
                     //start implausibility
+                    ETC.implausible_timer.reset();
                     ETC.implausible_timer.start();
                     ETC.state = IMPLAUSIBLE;
 
                 }
-                else if(pos1 >= 0.1|| pos2 >= 0.1 ||)
+                else if(pos1 >= 0.1|| pos2 >= 0.1)
                 {
-                    if((fabs(pos1-pos2)/2.0)*100 > 10)
+                    if(fabs(pos1 - pos2) / ((pos1 + pos2) / 2.0) > 0.10)
                     {
                         //Pedal positions differ more than 10%
                         //start implausibility
+                        ETC.implausible_timer.reset();
                         ETC.implausible_timer.start();
                         ETC.state = IMPLAUSIBLE;
                     }
                 }
+                break;
             }
             case IMPLAUSIBLE:
             {
@@ -94,7 +100,7 @@ int main()
                 double pos1 = 0.5 * sensor1V - 0.125;
                 double pos2 = (5.0 / 12.0) * sensor2V - 0.125;
                 bool expectedRange0 = 0.25 < sensor1V && sensor1V < 2.25;
-                bool expectedRange1 = 0.3 < sensor1V && sensor2V < 2.7;
+                bool expectedRange1 = 0.3 < sensor2V && sensor2V < 2.7;
 
                 //check if positions are plausible
                 if(expectedRange0 && expectedRange1)
@@ -107,7 +113,7 @@ int main()
                         ETC.implausible_timer.reset();
                     }
                     //positions are within 10%
-                    else if((fabs(pos1-pos2)/2.0)*100 <= 10)
+                    else if(fabs(pos1 - pos2) / ((pos1 + pos2) / 2.0) <= 0.10)
                     {
                         ETC.state = RUNNING;
                         ETC.implausible_timer.stop();
@@ -115,18 +121,22 @@ int main()
                     }
                 }
                 //If it reaches here, it is still implausible
-                int64_t timer_ms = my_timer.elapsed_time().count()/1000; //microseconds to miliseconds
+                int64_t timer_ms = ETC.implausible_timer.elapsed_time().count()/1000; //microseconds to miliseconds
                 if(timer_ms > 100) //if implausibility has occured for longer than 100msec
                 {
                     printf("Implausibility occured for longer than 100msec: %lld ms\n", timer_ms);
                     printf("0");
                     ETC.state = STOP;
                 }
+                break;
             }
             case STOP:
             {
                 printf("Shut down power to motor");
+                ThisThread::sleep_for(1s);
+                break;
             }
         }
+        ThisThread::sleep_for(10ms);
     }
 }
